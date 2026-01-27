@@ -1,222 +1,235 @@
-# JIKI: Twitter Crisis Detection using NLP + Reinforcement Learning
+# TEMPO: Twitter Emotion & Temporal Pattern Observer
+## Crisis Detection through BERT-based Emotion Analysis
 
-## Project Overview
+---
 
-This project builds an end-to-end machine learning system that combines NLP (Natural Language Processing) and Reinforcement Learning for Twitter crisis detection. The system learns optimal alert timing for crisis events by analyzing emotion patterns, event types, and temporal features from Twitter data.
+## 🎯 Project Overview
 
-**Key Innovation**: Instead of static rule-based thresholds, our RL agent learns context-aware decisions about WHEN to alert during evolving crisis situations.
+**TEMPO** analyzes Twitter data to detect fear levels during disasters and crisis events, providing early warning signals to government officials. Using BERT (Bidirectional Encoder Representations from Transformers), we classify emotions from tweets to identify when communities are experiencing heightened fear, anxiety, and distress during crises.
 
-## Architecture
+### Goals
+1. **Emotion Detection**: Train BERT to classify 13 emotions from tweets (with focus on fear, anxiety, distress)
+2. **Crisis vs. Non-Crisis Classification**: Distinguish genuine crisis emotions from excitement/entertainment
+3. **Temporal Analysis**: Track emotion patterns over time to detect escalating situations
+4. **Government Alerting**: Provide actionable insights for emergency response teams
 
+### Key Use Cases
+- Natural disasters (hurricanes, earthquakes, floods, wildfires)
+- Public safety emergencies (shootings, bombings)
+- Disease outbreaks
+- Civil unrest
+
+---
+
+## 🔄 Data Pipeline Phases
+
+The project follows a systematic 4-phase data preparation pipeline:
+
+### **Phase 1: DOWNLOAD** 📥
+Download raw datasets from various sources:
+- **GoEmotions** (58K Reddit comments, 27 emotions) - Emotion training data
+- **HumAID** (77K tweets, 19 disasters 2016-2019) - Crisis tweets with event labels
+- **CrisisLex** (28K tweets, 26 events 2012-2013) - Crisis tweets with informativeness labels
+- **Non-Crisis Events** (1.5M tweets) - 8 high-emotion but non-crisis events:
+  - Sports: FIFA World Cup 2022, 2018, Tokyo Olympics, ICC T20
+  - Entertainment: Game of Thrones, Coachella, Music Concerts  
+  - Politics: US Election 2020
+- **Baseline/Sentiment140** (1.6M tweets) - General Twitter noise
+
+**Output**: Raw CSV/TSV files in respective folders
+
+---
+
+### **Phase 2: PROCESS** ⚙️
+Clean and combine raw data:
+- **Extract Timestamps**: Convert tweet IDs to timestamps using Twitter Snowflake algorithm
+- **Combine HumAID Files**: Merge train/dev/test splits for each event
+- **Validate Data**: Check for missing values, duplicates, encoding issues
+
+**Output**: 
+- `crisis_datasets/humaid_all_with_timestamps.csv`
+- Individual event files with timestamps
+
+**When to Re-run**: 
+- After re-downloading raw data
+- If timestamp extraction fails
+- When adding new crisis events
+
+---
+
+### **Phase 3: STANDARDIZE** 🔧
+Unify all datasets to common format:
+
+**Standard Columns**:
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Multi-Task BERT Model                        │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐     │
-│  │  Emotion    │  │  Event Type │  │  Informativeness    │     │
-│  │  Extractor  │  │  Classifier │  │  Classifier         │     │
-│  │ (13 emotions)│  │(crisis/non) │  │  (CrisisLex)        │     │
-│  └─────────────┘  └─────────────┘  └─────────────────────┘     │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    RL Alert Timing Agent                        │
-│  State: [emotions_multi_timescale, event_type, volatility]     │
-│  Actions: [alert, wait_1hr, wait_2hr, dismiss]                 │
-│  Reward: +15 correct alert, -5 false alarm, -20 missed crisis  │
-└─────────────────────────────────────────────────────────────────┘
+text                 - Tweet text content
+created_at          - Timestamp (ISO format)
+event_name          - Specific event (e.g., "hurricane_harvey_2017")
+event_type          - General type (e.g., "hurricane", "earthquake", "sports")
+crisis_label        - Binary: 1 = crisis, 0 = non-crisis
+source_dataset      - Source: "HumAID", "CrisisLex", "GoEmotions", etc.
+informativeness     - How informative about the crisis (from CrisisLex)
+emotion_label       - Emotion category (1-13) - TO BE ADDED
 ```
 
-## Data Pipeline
+**Key Tasks**:
+- Map specific event names → general event types
+- Standardize column headers across all datasets
+- Map 27 GoEmotions → 13 target emotions
+- Handle missing values
 
+**Output**:
+- `standardized_data/crisis_combined.csv` (66K rows)
+- `standardized_data/non_crisis_combined.csv` (1.5M rows)
+- Individual standardized files
+
+**When to Re-run**:
+- After modifying event type mappings
+- When emotion mapping changes (27→13)
+- If new columns are added
+- After fixing data quality issues
+
+---
+
+### **Phase 4: COMBINE** 🔗
+Create final master training file:
+
+**Process**:
+1. Combine GoEmotions + Crisis + Non-Crisis data
+2. Handle partial labels (not all tweets have all label types)
+3. Shuffle data to prevent catastrophic forgetting
+4. Create train/validation/test splits
+
+**Output**:
+- `master_training_data/master_training_data.csv` - Final training file
+- `master_training_data/master_training_sample_1000.csv` - Preview sample
+
+**Column Structure**:
 ```
-Phase 1: DOWNLOAD          Phase 2: PROCESS           Phase 3: STANDARDIZE       Phase 4: COMBINE
-┌──────────────────┐      ┌──────────────────┐      ┌──────────────────┐      ┌──────────────────┐
-│ GoEmotions       │      │ Extract          │      │ Standardize      │      │ Master Training  │
-│ HumAID           │ ───► │ Timestamps       │ ───► │ Column Headers   │ ───► │ File             │
-│ CrisisLex        │      │ Combine Files    │      │ Map Event Types  │      │ (Shuffled)       │
-│ Non-Crisis (8)   │      │                  │      │                  │      │                  │
-│ Baseline         │      │                  │      │                  │      │                  │
-└──────────────────┘      └──────────────────┘      └──────────────────┘      └──────────────────┘
+text, emotion_label (1-13), event_type, informativeness, 
+crisis_label, source_dataset, created_at
 ```
 
-## Folder Structure
+**When to Re-run**:
+- After Phase 3 changes
+- When adding new datasets
+- Before training BERT model
+- If shuffling seed needs to change
 
+---
+
+## 🔄 When to Reset/Refresh the Model
+
+### **Complete Pipeline Re-run** (Phases 1→4)
+- Adding entirely new datasets
+- Major changes to emotion mapping (27→13)
+- Restructuring column schema
+- Starting fresh after data corruption
+
+### **Partial Re-run** (Phase 3→4)
+- Modifying event type mappings
+- Fixing informativeness labels
+- Adding emotion_label column
+- Column name changes
+
+### **Final Phase Only** (Phase 4)
+- Changing train/val/test split ratios
+- Different shuffling strategy
+- Creating subsamples for testing
+
+### **No Re-run Needed**
+- Training different BERT models
+- Experimenting with hyperparameters
+- Creating additional analysis notebooks
+
+---
+
+## 📊 Current Data Status
+
+**Available** ✅:
+- Crisis combined: 66,748 tweets
+- Non-crisis combined: 1,533,696 tweets
+- Standardized datasets with columns: `text, created_at, event_name, event_type, crisis_label, source_dataset, informativeness`
+
+**Missing** ❌:
+- GoEmotions data (27 emotions)
+- Emotion labels (need to add `emotion_label` column)
+- Master training file
+
+**Next Priority**:
+1. Download GoEmotions from Google Drive
+2. Define 13 target emotions
+3. Create 27→13 emotion mapping
+4. Add emotion_label column to datasets
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+```bash
+# Python 3.14+
+python3 -m venv venv
+source venv/bin/activate
+pip install pandas numpy jupyter ipykernel
 ```
-JIKI/
-├── README.md                           # This file
-├── scripts/
-│   ├── phase1_download/                # Data collection scripts
-│   │   ├── download_goemotions.py
-│   │   ├── download_baseline.py
-│   │   ├── download_humaid.py
-│   │   ├── download_crisislex.py
-│   │   └── download_non_crisis.py
-│   ├── phase2_process/                 # Data processing scripts
-│   │   ├── extract_humaid_timestamps.py
-│   │   └── combine_humaid_files.py
-│   ├── phase3_standardize/             # Standardization scripts
-│   │   ├── standardize_crisis_data.py
-│   │   └── standardize_non_crisis_data.py
-│   └── phase4_combine/                 # Final combination
-│       └── create_master_training_file.py
-├── utils/                              # Helper/utility scripts
-│   ├── check_crisis_events.py
+
+### Setup
+1. Clone this repository
+2. Download data folders from Google Drive to project root:
+   - `standardized_data/`
+   - `goemotion_data/`
+   - `master_training_data/` (optional)
+3. Run inspection notebooks:
+   - `00_project_status.ipynb` - Overview of all data
+   - `01_data_inspection.ipynb` - Detailed analysis
+
+### Repository Structure
+```
+TEMPO/
+├── README.md                          # This file
+├── SCRIPTS_REFERENCE.md               # Documentation of all scripts/notebooks
+├── .gitignore                         # Excludes data folders
+│
+├── scripts/                           # Data pipeline scripts
+│   ├── phase1_download/               # Download from sources
+│   ├── phase2_process/                # Clean and combine
+│   ├── phase3_standardize/            # Unify format
+│   └── phase4_combine/                # Create master file
+│
+├── utils/                             # Analysis and inspection tools
 │   ├── check_goemotions_baseline.py
+│   ├── check_crisis_events.py
 │   ├── explore_non_crisis.py
 │   └── inspect_large_dataset.py
-├── archive/                            # Obsolete/draft scripts
-│   ├── download_crisislex_old.py
-│   └── test_hurricane_harvey.py
-├── data/                               # Raw downloaded data
-│   ├── goemotion_data/
-│   ├── baseline_data/
-│   ├── crisis_datasets/
-│   └── non_crisis_data/
-├── standardized_data/                  # Processed standardized data
-│   ├── crisis_combined.csv
-│   ├── non_crisis_combined.csv
-│   └── [individual standardized files]
-└── master_training_data/               # Final training data
-    ├── master_training_data.csv
-    └── master_training_sample_1000.csv
+│
+├── 00_project_status.ipynb            # Dashboard of all data files
+├── 01_data_inspection.ipynb           # Detailed data inspection
+│
+└── [data folders - not in git]
+    ├── standardized_data/             # Processed data
+    ├── crisis_datasets/               # Raw crisis data
+    ├── goemotion_data/                # Emotion labels
+    ├── non_crisis_data/               # Non-crisis events
+    ├── master_training_data/          # Final training file
+    └── baseline_data/                 # General tweets
 ```
 
-## Datasets
+---
 
-### Training Data Sources
+## 📝 Documentation
 
-| Dataset | Purpose | Rows | Labels |
-|---------|---------|------|--------|
-| GoEmotions | Emotion classification | ~58K | 13 emotions (fear, anger, joy, etc.) |
-| HumAID | Crisis events | ~77K | Event type, timestamps |
-| CrisisLex T26 | Crisis events | ~28K | Event type, informativeness, timestamps |
-| Non-Crisis (8 datasets) | Non-crisis events | ~2M+ | Event type (sports, entertainment, politics) |
-| Sentiment140 | Baseline noise | 1.6M | None (general noise) |
+- See [SCRIPTS_REFERENCE.md](SCRIPTS_REFERENCE.md) for detailed documentation of each script and notebook
 
-### Non-Crisis Datasets
-- FIFA World Cup 2022
-- FIFA World Cup 2018
-- Tokyo Olympics 2020
-- US Election 2020
-- Game of Thrones Season 8
-- Coachella 2015
-- Music Concerts 2021
-- ICC T20 World Cup 2021
+---
 
-### Standardized Column Format
+## 👥 Team
 
-All datasets are standardized to:
-```
-text | created_at | event_name | event_type | crisis_label | source_dataset | informativeness
-```
+JIKI DAP Round 2 Team
+January 2026
 
-| Column | Description |
-|--------|-------------|
-| `text` | Tweet content |
-| `created_at` | UTC timestamp |
-| `event_name` | Specific event (e.g., `hurricane_harvey_2017`) |
-| `event_type` | Category (e.g., `hurricane`, `sports`, `entertainment`) |
-| `crisis_label` | 1 = crisis, 0 = non-crisis |
-| `source_dataset` | Origin dataset name |
-| `informativeness` | CrisisLex label (if available) |
+---
 
-## Quick Start
+## 📄 License
 
-### 1. Install Dependencies
-```bash
-pip install pandas numpy datasets kaggle transformers torch
-```
-
-### 2. Configure Kaggle API (for downloading datasets)
-```bash
-# Get API key from https://www.kaggle.com/settings
-mkdir -p ~/.kaggle
-mv ~/Downloads/kaggle.json ~/.kaggle/
-chmod 600 ~/.kaggle/kaggle.json
-```
-
-### 3. Run Data Pipeline
-
-```bash
-# Phase 1: Download all datasets
-python scripts/phase1_download/download_goemotions.py
-python scripts/phase1_download/download_humaid.py
-python scripts/phase1_download/download_crisislex.py
-python scripts/phase1_download/download_non_crisis.py
-python scripts/phase1_download/download_baseline.py
-
-# Phase 2: Process (extract timestamps, combine files)
-python scripts/phase2_process/extract_humaid_timestamps.py
-python scripts/phase2_process/combine_humaid_files.py
-
-# Phase 3: Standardize
-python scripts/phase3_standardize/standardize_crisis_data.py
-python scripts/phase3_standardize/standardize_non_crisis_data.py
-
-# Phase 4: Create master training file
-python scripts/phase4_combine/create_master_training_file.py
-```
-
-### 4. Output
-After running the pipeline, you'll have:
-- `master_training_data/master_training_data.csv` - Ready for multi-task BERT training
-
-## Event Type Mapping
-
-### Crisis Events
-| Event Name Pattern | Event Type |
-|-------------------|------------|
-| hurricane_*, cyclone_*, typhoon_* | `hurricane` |
-| earthquake_*, quake_* | `earthquake` |
-| flood_*, flooding_* | `flood` |
-| wildfire_*, fire_*, bushfire_* | `wildfire` |
-| shooting_*, gunfire_* | `shooting` |
-| bombing_*, explosion_* | `bombing` |
-| covid_*, pandemic_* | `disease_outbreak` |
-
-### Non-Crisis Events
-| Dataset | Event Type |
-|---------|------------|
-| FIFA World Cup, Olympics, ICC T20 | `sports` |
-| Coachella, Music Concerts, Game of Thrones | `entertainment` |
-| US Election | `politics` |
-
-## Key Features
-
-### Multi-Task Learning
-- **One BERT model** with 3 output heads (prevents catastrophic forgetting)
-- Handles **partial labels** (not all tweets have all 3 label types)
-- **13 emotions** for richer crisis detection (not just fear/anger/joy)
-
-### Temporal Features (for RL)
-- Multi-timescale emotions (current, 1hr ago, 3hr ago, 6hr ago)
-- Emotion volatility (standard deviation over 3-hour window)
-- Tweet volume tracking
-
-### Episode Structure
-```python
-episode = {
-    'event_id': 'hurricane_harvey_2017',
-    'is_crisis': True,
-    'optimal_alert_hour': 3,
-    'timeline': [
-        {'hour': 0, 'state': [...], 'action': 'wait', 'reward': 0},
-        {'hour': 1, 'state': [...], 'action': 'wait', 'reward': 0},
-        {'hour': 2, 'state': [...], 'action': 'alert', 'reward': +15},
-    ]
-}
-```
-
-
-
-## References
-
-- Benhamou, E., et al. (2021). "Detecting and adapting to crisis pattern with context based Deep Reinforcement Learning." ICPR 2020.
-- GoEmotions Dataset: https://github.com/google-research/google-research/tree/master/goemotions
-- HumAID Dataset: https://crisisnlp.qcri.org/humaid_dataset
-- CrisisLex: https://crisislex.org/
-
-## License
-
-This project is for educational purposes as part of the DAP (Data Analytics Project) program.
+[Add license information]
