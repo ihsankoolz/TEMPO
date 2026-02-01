@@ -365,6 +365,8 @@ def combine_all_datasets(goemotions_df, crisis_df, non_crisis_df):
     # Optionally write the full master file (v4). This is disabled by default to avoid large writes.
     if WRITE_FULL_MASTER:
         print(f"\nWriting full master training file (v4)...")
+        # Impute missing created_at in the full master before writing (for auditability)
+        master = impute_created_at(master, pool_paths=[CRISIS_COMBINED_PATH, NON_CRISIS_COMBINED_PATH], seed=42, jitter_hours=6)
         master.to_csv(MASTER_FILE_V4, index=False)
         print(f"SAVED: {MASTER_FILE_V4}")
     else:
