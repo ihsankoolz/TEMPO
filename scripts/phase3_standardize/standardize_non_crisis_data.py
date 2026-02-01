@@ -41,6 +41,47 @@ Date: January 2026
 import pandas as pd
 import os
 from datetime import datetime
+import numpy as np
+
+
+def impute_created_at(df, seed=42, group_col='event_name', jitter_hours=6):
+    """
+    Impute missing created_at timestamps for non-crisis combined DataFrame.
+    Uses event-level sampling where possible, otherwise samples overall known timestamps.
+    """
+    df = df.copy()
+    rng = np.random.default_rng(seed)
+    df['created_at'] = pd.to_datetime(df['created_at'], errors='coerce')
+
+    if 'created_at_imputed' not in df.columns:
+        df['created_at_imputed'] = False
+    if 'created_at_imputed_method' not in df.columns:
+        df['created_at_imputed_method'] = None
+
+    known = df['created_at'].dropna()
+    if known.empty:
+        fallback = pd.to_datetime('2018-06-30 23:53:08')
+        for idx in df[df['created_at'].isna()].index:
+            df.at[idx, 'created_at'] = fallback
+            df.at[idx, 'created_at_imputed'] = True
+            df.at[idx, 'created_at_imputed_method'] = 'fixed_fallback'
+        return df
+
+    for idx in df[df['created_at'].isna()].index:
+        group = df.at[idx, group_col]
+        group_times = df[(df[group_col] == group) & (~df['created_at'].isna())]['created_at']
+        if len(group_times) > 0:
+            sampled = group_times.iloc[int(rng.integers(0, len(group_times)))]
+            method = 'sampling_event'
+        else:
+            sampled = known.iloc[int(rng.integers(0, len(known)))]
+            method = 'sampling_overall'
+        jitter_seconds = int(rng.integers(-jitter_hours * 3600, jitter_hours * 3600))
+        df.at[idx, 'created_at'] = sampled + pd.Timedelta(seconds=jitter_seconds)
+        df.at[idx, 'created_at_imputed'] = True
+        df.at[idx, 'created_at_imputed_method'] = method
+
+    return df
 
 print("="*80)
 print("STANDARDIZING NON-CRISIS DATASETS")
@@ -254,12 +295,17 @@ if len(all_datasets) > 0:
     print(combined['event_type'].value_counts().to_string())
     print(f"\n   By Event Name:")
     print(combined['event_name'].value_counts().to_string())
-    print(f"\n   Date Range:")
-    print(f"   Earliest: {combined['created_at'].min()}")
-    print(f"   Latest: {combined['created_at'].max()}")
 
-    # Save combined file
-    combined_file = os.path.join(OUTPUT_DIR, "non_crisis_combined.csv")
+    # Impute missing timestamps across non-crisis combined
+    combined['created_at_imputed'] = False
+    combined['created_at_imputed_method'] = None
+    combined = impute_created_at(combined, seed=42, group_col='event_name', jitter_hours=6)
+
+    # Format created_at to uniform string
+    combined['created_at'] = pd.to_datetime(combined['created_at']).dt.strftime('%Y-%m-%d %H:%M:%S')
+
+    # Save combined file (dates-only, non-destructive)
+    combined_file = os.path.join(OUTPUT_DIR, "non_crisis_combined_dates_only.csv")
     combined.to_csv(combined_file, index=False)
     print(f"\nCOMBINED FILE SAVED: {combined_file}")
 

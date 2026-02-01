@@ -235,6 +235,10 @@
 **Output**:
 - `master_training_data/master_training_data.csv`
 - `master_training_data/master_training_sample_1000.csv` (preview)
+- `master_training_data/master_training_sample_10kv3.csv` (10k review sample)
+- `master_training_data/master_training_sample_10kv3_imputed.csv` (10k sample with missing `created_at` filled and audit flags)
+
+**Note (new behavior)**: When creating the 10k review sample the script will now automatically impute missing `created_at` values (sampling realistic timestamps from the crisis + non-crisis pools with a small ±6 hour jitter). Imputed rows include `created_at_imputed` and `created_at_imputed_method` columns for auditability. Writing the full master (`master_training_data_v4.csv`) remains opt-in (`WRITE_FULL_MASTER = True`).
 
 **Column structure**:
 ```
