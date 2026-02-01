@@ -46,6 +46,11 @@ Date: January 2026
 import pandas as pd
 import numpy as np
 import os
+import sys
+
+# Add project root to path to import utilities
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+from utils.impute_missing_dates import impute_missing_dates, standardize_timestamp_format
 
 print("="*80)
 print("CREATING MASTER TRAINING FILE FOR MULTI-TASK BERT")
@@ -226,7 +231,7 @@ def process_goemotions():
         'informativeness': None,
         'crisis_label': None,
         'source_dataset': 'goemotions',
-        'created_at': None
+        'created_at': pd.NaT  # Use NaT instead of None for dates
     })
 
     before = len(standardized)
@@ -356,9 +361,14 @@ def combine_all_datasets(goemotions_df, crisis_df, non_crisis_df):
     sample_df.to_csv(SAMPLE_FILE_10KV3, index=False)
     print(f"SAMPLE SAVED: {SAMPLE_FILE_10KV3}")
 
-    # Impute missing `created_at` in the sample using crisis + non-crisis pools and save an imputed copy
+    # Impute missing `created_at` in the sample using new utility
     print("\nImputing missing created_at in the sample (if any) and saving imputed copy...")
-    imputed_sample = impute_created_at(sample_df, pool_paths=[CRISIS_COMBINED_PATH, NON_CRISIS_COMBINED_PATH], seed=42, jitter_hours=6)
+    imputed_sample = impute_missing_dates(
+        sample_df, 
+        method='sample_pool',
+        reference_col='source_dataset',
+        jitter_hours=6
+    )
     imputed_sample.to_csv(SAMPLE_FILE_10KV3_IMPUTED, index=False)
     print(f"IMPUTED SAMPLE SAVED: {SAMPLE_FILE_10KV3_IMPUTED}")
 
@@ -366,7 +376,12 @@ def combine_all_datasets(goemotions_df, crisis_df, non_crisis_df):
     if WRITE_FULL_MASTER:
         print(f"\nWriting full master training file (v4)...")
         # Impute missing created_at in the full master before writing (for auditability)
-        master = impute_created_at(master, pool_paths=[CRISIS_COMBINED_PATH, NON_CRISIS_COMBINED_PATH], seed=42, jitter_hours=6)
+        master = impute_missing_dates(
+            master,
+            method='sample_pool',
+            reference_col='source_dataset',
+            jitter_hours=6
+        )
         master.to_csv(MASTER_FILE_V4, index=False)
         print(f"SAVED: {MASTER_FILE_V4}")
     else:
