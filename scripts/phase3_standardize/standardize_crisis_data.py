@@ -104,6 +104,64 @@ def map_event_to_type(event_name):
     return 'other_crisis'
 
 # ============================================================================
+# HELPERS: TIMESTAMP IMPUTATION
+# ============================================================================
+
+import numpy as np
+
+def impute_created_at(df, seed=42, group_col='event_name', jitter_hours=6):
+    """
+    Impute missing created_at timestamps.
+    Strategy:
+      - For each missing timestamp, sample from known timestamps within the same event (if available).
+      - Otherwise sample from overall known timestamps.
+      - Add jitter up to +/- jitter_hours hours.
+    Returns a NEW DataFrame with 'created_at' imputed and columns
+    'created_at_imputed' (bool) and 'created_at_imputed_method' (str) set.
+    """
+    df = df.copy()
+    rng = np.random.default_rng(seed)
+
+    # Ensure created_at is datetime
+    df['created_at'] = pd.to_datetime(df['created_at'], errors='coerce')
+
+    # Initialize flags
+    if 'created_at_imputed' not in df.columns:
+        df['created_at_imputed'] = False
+    if 'created_at_imputed_method' not in df.columns:
+        df['created_at_imputed_method'] = None
+
+    known = df['created_at'].dropna()
+    if known.empty:
+        # nothing to sample from; fill with a fixed fallback timestamp for reproducibility
+        fallback = pd.to_datetime('2018-06-30 23:53:08')
+        miss_idx = df[df['created_at'].isna()].index
+        for idx in miss_idx:
+            df.at[idx, 'created_at'] = fallback
+            df.at[idx, 'created_at_imputed'] = True
+            df.at[idx, 'created_at_imputed_method'] = 'fixed_fallback'
+        return df
+
+    missing_idx = df[df['created_at'].isna()].index
+    for idx in missing_idx:
+        row = df.loc[idx]
+        group = row.get(group_col)
+        # sample within group if possible
+        group_times = df[(df[group_col] == group) & (~df['created_at'].isna())]['created_at']
+        if len(group_times) > 0:
+            sampled = group_times.iloc[int(rng.integers(0, len(group_times)))]
+            method = 'sampling_event'
+        else:
+            sampled = known.iloc[int(rng.integers(0, len(known)))]
+            method = 'sampling_overall'
+        jitter_seconds = int(rng.integers(-jitter_hours * 3600, jitter_hours * 3600))
+        df.at[idx, 'created_at'] = sampled + pd.Timedelta(seconds=jitter_seconds)
+        df.at[idx, 'created_at_imputed'] = True
+        df.at[idx, 'created_at_imputed_method'] = method
+
+    return df
+
+# ============================================================================
 # STANDARDIZE HUMAID
 # ============================================================================
 
@@ -128,10 +186,11 @@ def standardize_humaid():
     print(f"\nEvent Type Distribution:")
     print(humaid['event_type'].value_counts().to_string())
 
-    # Standardize to common format
+    # Standardize to common format (parse created_at but do NOT drop rows with missing timestamps)
+    created_at_parsed = pd.to_datetime(humaid['created_at'], errors='coerce')
     standardized = pd.DataFrame({
         'text': humaid['tweet_text'],
-        'created_at': pd.to_datetime(humaid['created_at'], format='mixed', errors='coerce'),
+        'created_at': created_at_parsed,
         'event_name': humaid['event_name'],
         'event_type': humaid['event_type'],
         'crisis_label': 1,
@@ -139,24 +198,32 @@ def standardize_humaid():
         'informativeness': None
     })
 
-    # Remove rows with missing text or timestamp
+    # Remove rows with missing text only (keep rows with missing created_at to impute)
     before = len(standardized)
-    standardized = standardized.dropna(subset=['text', 'created_at'])
+    standardized = standardized.dropna(subset=['text'])
     after = len(standardized)
     if before > after:
-        print(f"Removed {before - after:,} rows with missing text/timestamp")
+        print(f"Removed {before - after:,} rows with missing text")
 
-    # Remove duplicates
+    # Impute missing timestamps
+    standardized['created_at_imputed'] = False
+    standardized['created_at_imputed_method'] = None
+    standardized = impute_created_at(standardized, group_col='event_name', seed=42, jitter_hours=6)
+
+    # Remove duplicates (based on text and created_at string after imputation)
     before = len(standardized)
     standardized = standardized.drop_duplicates(subset=['text', 'created_at'])
     after = len(standardized)
     if before > after:
         print(f"Removed {before - after:,} duplicate tweets")
 
+    # Format created_at to uniform string: YYYY-MM-DD HH:MM:SS
+    standardized['created_at'] = pd.to_datetime(standardized['created_at']).dt.strftime('%Y-%m-%d %H:%M:%S')
+
     print(f"\nHumAID Standardized: {len(standardized):,} rows")
 
-    # Save
-    output_path = os.path.join(OUTPUT_DIR, "humaid_standardized.csv")
+    # Save to a non-destructive dates-only filename
+    output_path = os.path.join(OUTPUT_DIR, "humaid_dates_only.csv")
     standardized.to_csv(output_path, index=False)
     print(f"Saved to: {output_path}")
 
@@ -212,10 +279,11 @@ def standardize_crisislex():
     print(f"\nInformativeness Distribution (after cleaning):")
     print(crisislex['informativeness_clean'].value_counts(dropna=False).to_string())
 
-    # Standardize to common format
+    # Standardize to common format (parse created_at but do NOT drop rows with missing timestamps)
+    created_at_parsed = pd.to_datetime(crisislex['created_at'], errors='coerce')
     standardized = pd.DataFrame({
         'text': crisislex['Tweet Text'],
-        'created_at': pd.to_datetime(crisislex['created_at'], format='mixed', errors='coerce'),
+        'created_at': created_at_parsed,
         'event_name': crisislex['event_name'],
         'event_type': crisislex['event_type'],
         'crisis_label': 1,
@@ -223,12 +291,17 @@ def standardize_crisislex():
         'informativeness': crisislex['informativeness_clean']
     })
 
-    # Remove rows with missing text or timestamp
+    # Remove rows with missing text only (keep rows with missing created_at to impute)
     before = len(standardized)
-    standardized = standardized.dropna(subset=['text', 'created_at'])
+    standardized = standardized.dropna(subset=['text'])
     after = len(standardized)
     if before > after:
-        print(f"Removed {before - after:,} rows with missing text/timestamp")
+        print(f"Removed {before - after:,} rows with missing text")
+
+    # Impute missing timestamps
+    standardized['created_at_imputed'] = False
+    standardized['created_at_imputed_method'] = None
+    standardized = impute_created_at(standardized, group_col='event_name', seed=42, jitter_hours=6)
 
     # Remove duplicates
     before = len(standardized)
@@ -237,10 +310,13 @@ def standardize_crisislex():
     if before > after:
         print(f"Removed {before - after:,} duplicate tweets")
 
+    # Format created_at to uniform string: YYYY-MM-DD HH:MM:SS
+    standardized['created_at'] = pd.to_datetime(standardized['created_at']).dt.strftime('%Y-%m-%d %H:%M:%S')
+
     print(f"\nCrisisLex Standardized: {len(standardized):,} rows")
 
-    # Save
-    output_path = os.path.join(OUTPUT_DIR, "crisislex_standardized.csv")
+    # Save to a non-destructive dates-only filename
+    output_path = os.path.join(OUTPUT_DIR, "crisislex_dates_only.csv")
     standardized.to_csv(output_path, index=False)
     print(f"Saved to: {output_path}")
 
@@ -268,11 +344,12 @@ def combine_crisis_datasets(humaid_df, crisislex_df):
     print(f"\n   By Source:")
     print(combined['source_dataset'].value_counts().to_string())
     print(f"\n   Date Range:")
-    print(f"   Earliest: {combined['created_at'].min()}")
-    print(f"   Latest: {combined['created_at'].max()}")
+    dt = pd.to_datetime(combined['created_at'], errors='coerce')
+    print(f"   Earliest: {dt.min()}")
+    print(f"   Latest: {dt.max()}")
 
-    # Save combined
-    output_path = os.path.join(OUTPUT_DIR, "crisis_combined.csv")
+    # Save combined to a dates-only file (non-destructive)
+    output_path = os.path.join(OUTPUT_DIR, "crisis_combined_dates_only.csv")
     combined.to_csv(output_path, index=False)
     print(f"\nCOMBINED FILE SAVED: {output_path}")
 
