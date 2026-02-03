@@ -116,10 +116,7 @@ Create master training file for BERT:
 
 **Output**:
 - `master_training_data/master_training_data_v3.csv` (~217K rows, shuffled)
-- `master_training_data/master_training_sample_10k.csv` (for testing)
-- `master_training_data/master_training_sample_10kv3_imputed.csv` (10k sample with missing `created_at` filled and audit columns)
-
-**New behavior (imputation)**: When creating the 10k sample the pipeline now automatically fills missing `created_at` values by sampling realistic timestamps from the consolidated crisis and non-crisis pools with a small ±6 hour jitter for realism. Imputed rows include `created_at_imputed` (bool) and `created_at_imputed_method` (str) for auditability. Writing the full master (`master_training_data_v4.csv`) remains opt-in via `WRITE_FULL_MASTER = True` in `scripts/phase4_combine/create_master_training_file.py`.
+- `master_training_data/master_training_sample_10k.csv` (for preview)
 
 ---
 
