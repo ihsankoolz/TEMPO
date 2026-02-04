@@ -7,7 +7,7 @@ file with partial labels for multi-task BERT training.
 
 Purpose:
     - Create unified dataset for training ONE multi-task BERT model
-    - Handle partial labels (not all tweets have all 3 label types)
+    - Handle partial labels (not all tweets have all label types)
     - Shuffle data to prevent catastrophic forgetting
 
 Input:
@@ -16,20 +16,17 @@ Input:
     - standardized_data/non_crisis_combined.csv (event type)
 
 Output:
-    - master_training_data/master_training_data.csv
-    - master_training_data/master_training_sample_1000.csv (for preview)
+    - master_training_data/master_training_data_v3.csv
+    - master_training_data/master_training_sample_10k.csv (for preview)
 
 Master File Columns:
     text, emotion_fear, emotion_anger, emotion_joy, ...(13 emotions),
-    event_type, informativeness, crisis_label, source_dataset, created_at
-
-Partial Labels:
-    - GoEmotions: Has emotions, NULL event_type/informativeness
-    - Crisis: Has event_type/informativeness, NULL emotions
-    - Non-Crisis: Has event_type, NULL emotions/informativeness
+    event_type, informativeness, crisis_label, source_dataset
 
 Note:
-    Baseline dataset is NOT included - non-crisis provides sufficient contrast.
+    - created_at is NOT included - BERT doesn't need timestamps
+    - Timestamps are only needed for RL training (uses original datasets)
+    - Baseline dataset is NOT included - non-crisis provides sufficient contrast
 
 Usage:
     python scripts/phase4_combine/create_master_training_file.py
@@ -46,11 +43,6 @@ Date: January 2026
 import pandas as pd
 import numpy as np
 import os
-import sys
-
-# Add project root to path to import utilities
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-from utils.impute_missing_dates import impute_missing_dates, standardize_timestamp_format
 
 print("="*80)
 print("CREATING MASTER TRAINING FILE FOR MULTI-TASK BERT")
@@ -61,98 +53,19 @@ print("="*80)
 # ============================================================================
 
 GOEMOTIONS_PATH = "./goemotion_data/goemotions.csv"
-# Prefer dates-only combined files (non-destructive). Fall back to legacy filenames.
-CRISIS_COMBINED_PATH = "./standardized_data/crisis_combined_dates_only.csv" if os.path.exists("./standardized_data/crisis_combined_dates_only.csv") else "./standardized_data/crisis_combined.csv"
-NON_CRISIS_COMBINED_PATH = "./standardized_data/non_crisis_combined_dates_only.csv" if os.path.exists("./standardized_data/non_crisis_combined_dates_only.csv") else "./standardized_data/non_crisis_combined.csv"
+CRISIS_COMBINED_PATH = "./standardized_data/crisis_combined.csv"
+NON_CRISIS_COMBINED_PATH = "./standardized_data/non_crisis_combined.csv"
 
 OUTPUT_DIR = "./master_training_data/"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-# New file naming: sample_10k v3 and master v4 (full master writing is opt-in)
-SAMPLE_SIZE_10K = 10000
-SAMPLE_FILE_10KV3 = os.path.join(OUTPUT_DIR, "master_training_sample_10kv3.csv")
-MASTER_FILE_V4 = os.path.join(OUTPUT_DIR, "master_training_data_v4.csv")
-# Imputed sample filename (non-destructive)
-SAMPLE_FILE_10KV3_IMPUTED = os.path.join(OUTPUT_DIR, "master_training_sample_10kv3_imputed.csv")
-# By default do NOT write the full master (large). To enable, set WRITE_FULL_MASTER = True.
-WRITE_FULL_MASTER = False
 
-
-def impute_created_at(df, pool_paths, seed=42, jitter_hours=6):
-    """Impute missing created_at in a DataFrame using timestamps sampled
-    from provided pool CSVs. Adds `created_at_imputed` (bool) and
-    `created_at_imputed_method` (str) columns and returns a new DataFrame.
-    """
-    df = df.copy()
-    rng = np.random.default_rng(seed)
-
-    # parse existing created_at
-    df['created_at_parsed'] = pd.to_datetime(df['created_at'], errors='coerce')
-
-    if 'created_at_imputed' not in df.columns:
-        df['created_at_imputed'] = False
-    if 'created_at_imputed_method' not in df.columns:
-        df['created_at_imputed_method'] = None
-
-    missing_idx = df[df['created_at_parsed'].isna()].index
-    if len(missing_idx) == 0:
-        # nothing to do
-        df['created_at'] = df['created_at_parsed'].dt.strftime('%Y-%m-%d %H:%M:%S')
-        df = df.drop(columns=['created_at_parsed'])
-        return df
-
-    # build pool from given CSVs
-    pool_ts = []
-    for p in pool_paths:
-        try:
-            tmp = pd.read_csv(p, usecols=['created_at'], low_memory=False)
-            pool_ts.extend(pd.to_datetime(tmp['created_at'], errors='coerce').dropna().tolist())
-        except Exception:
-            continue
-
-    if len(pool_ts) == 0:
-        fallback = pd.to_datetime('2018-06-30 23:53:08')
-        for idx in missing_idx:
-            df.at[idx, 'created_at_parsed'] = fallback
-            df.at[idx, 'created_at_imputed'] = True
-            df.at[idx, 'created_at_imputed_method'] = 'fixed_fallback'
-        df['created_at'] = df['created_at_parsed'].dt.strftime('%Y-%m-%d %H:%M:%S')
-        df = df.drop(columns=['created_at_parsed'])
-        return df
-
-    pool_arr = np.array(pool_ts, dtype='datetime64[ns]')
-    choices = rng.integers(0, len(pool_arr), size=len(missing_idx))
-    jitters = rng.integers(-jitter_hours*3600, jitter_hours*3600, size=len(missing_idx))
-
-    for i, idx in enumerate(missing_idx):
-        sampled = pd.to_datetime(pool_arr[choices[i]])
-        dt = sampled + pd.Timedelta(seconds=int(jitters[i]))
-        df.at[idx, 'created_at_parsed'] = dt
-        df.at[idx, 'created_at_imputed'] = True
-        df.at[idx, 'created_at_imputed_method'] = 'sampling_pool_jitter'
-
-    df['created_at'] = df['created_at_parsed'].dt.strftime('%Y-%m-%d %H:%M:%S')
-    df = df.drop(columns=['created_at_parsed'])
-    return df
+SAMPLE_SIZE = 10000
+MASTER_FILE = os.path.join(OUTPUT_DIR, "master_training_data_v3.csv")
+SAMPLE_FILE = os.path.join(OUTPUT_DIR, "master_training_sample_10k.csv")
 
 # ============================================================================
 # EMOTION LABEL MAPPING (from GoEmotions)
 # ============================================================================
-
-EMOTION_MAPPING = {
-    2: 'anger',
-    14: 'fear',
-    25: 'sadness',
-    19: 'nervousness',
-    11: 'disgust',
-    26: 'surprise',
-    6: 'confusion',
-    5: 'caring',
-    16: 'grief',
-    9: 'disappointment',
-    17: 'joy',
-    23: 'relief',
-    27: 'neutral'
-}
 
 EMOTION_COLUMNS = [
     'emotion_fear', 'emotion_sadness', 'emotion_anger', 'emotion_nervousness',
@@ -230,8 +143,7 @@ def process_goemotions():
         'event_type': None,
         'informativeness': None,
         'crisis_label': None,
-        'source_dataset': 'goemotions',
-        'created_at': pd.NaT  # Use NaT instead of None for dates
+        'source_dataset': 'goemotions'
     })
 
     before = len(standardized)
@@ -266,8 +178,18 @@ def process_crisis():
         df[emotion_col] = None
 
     column_order = ['text'] + EMOTION_COLUMNS + ['event_type', 'informativeness',
-                    'crisis_label', 'source_dataset', 'created_at']
-    standardized = df[column_order]
+                    'crisis_label', 'source_dataset']
+
+    # Only select columns that exist
+    available_cols = [c for c in column_order if c in df.columns]
+    standardized = df[available_cols].copy()
+
+    # Add missing columns
+    for col in column_order:
+        if col not in standardized.columns:
+            standardized[col] = None
+
+    standardized = standardized[column_order]
 
     print(f"\nCrisis Data Processed: {len(standardized):,} rows")
     return standardized
@@ -294,8 +216,18 @@ def process_non_crisis():
     df['informativeness'] = None
 
     column_order = ['text'] + EMOTION_COLUMNS + ['event_type', 'informativeness',
-                    'crisis_label', 'source_dataset', 'created_at']
-    standardized = df[column_order]
+                    'crisis_label', 'source_dataset']
+
+    # Only select columns that exist
+    available_cols = [c for c in column_order if c in df.columns]
+    standardized = df[available_cols].copy()
+
+    # Add missing columns
+    for col in column_order:
+        if col not in standardized.columns:
+            standardized[col] = None
+
+    standardized = standardized[column_order]
 
     print(f"\nNon-Crisis Data Processed: {len(standardized):,} rows")
     return standardized
@@ -352,40 +284,16 @@ def combine_all_datasets(goemotions_df, crisis_df, non_crisis_df):
     print(f"   Event type labels: {master['event_type'].notna().sum():,} rows")
     print(f"   Informativeness labels: {master['informativeness'].notna().sum():,} rows")
 
-    # Save sample 10k for review (v3)
-    print(f"\nSaving sample ({SAMPLE_SIZE_10K}) for review...")
-    if len(master) >= SAMPLE_SIZE_10K:
-        sample_df = master.head(SAMPLE_SIZE_10K).copy()
-    else:
-        sample_df = master.sample(n=min(SAMPLE_SIZE_10K, len(master)), random_state=42).copy()
-    sample_df.to_csv(SAMPLE_FILE_10KV3, index=False)
-    print(f"SAMPLE SAVED: {SAMPLE_FILE_10KV3}")
+    # Save full master file
+    print(f"\nSaving master file...")
+    master.to_csv(MASTER_FILE, index=False)
+    print(f"MASTER SAVED: {MASTER_FILE}")
 
-    # Impute missing `created_at` in the sample using new utility
-    print("\nImputing missing created_at in the sample (if any) and saving imputed copy...")
-    imputed_sample = impute_missing_dates(
-        sample_df, 
-        method='sample_pool',
-        reference_col='source_dataset',
-        jitter_hours=6
-    )
-    imputed_sample.to_csv(SAMPLE_FILE_10KV3_IMPUTED, index=False)
-    print(f"IMPUTED SAMPLE SAVED: {SAMPLE_FILE_10KV3_IMPUTED}")
-
-    # Optionally write the full master file (v4). This is disabled by default to avoid large writes.
-    if WRITE_FULL_MASTER:
-        print(f"\nWriting full master training file (v4)...")
-        # Impute missing created_at in the full master before writing (for auditability)
-        master = impute_missing_dates(
-            master,
-            method='sample_pool',
-            reference_col='source_dataset',
-            jitter_hours=6
-        )
-        master.to_csv(MASTER_FILE_V4, index=False)
-        print(f"SAVED: {MASTER_FILE_V4}")
-    else:
-        print("\nSkipping full master write (MASTER_FILE_V4). To enable, set WRITE_FULL_MASTER = True in the script.")
+    # Save sample for review
+    print(f"\nSaving sample ({SAMPLE_SIZE}) for review...")
+    sample_df = master.sample(n=min(SAMPLE_SIZE, len(master)), random_state=42)
+    sample_df.to_csv(SAMPLE_FILE, index=False)
+    print(f"SAMPLE SAVED: {SAMPLE_FILE}")
 
     return master
 
@@ -414,13 +322,16 @@ if __name__ == "__main__":
         print(f"{'='*80}")
         print(f"""
 Files created:
-   - master_training_data.csv ({len(master):,} rows)
-   - master_training_sample_1000.csv (for preview)
+   - {MASTER_FILE} ({len(master):,} rows)
+   - {SAMPLE_FILE} (for preview)
 
 Datasets included:
    - GoEmotions (emotions)
    - Crisis datasets (event types + informativeness)
    - Non-crisis datasets (event types)
+
+Note: created_at column NOT included - BERT doesn't need timestamps.
+      For RL training, use original datasets which have timestamps.
 
 READY FOR MULTI-TASK BERT TRAINING!
         """)
