@@ -36,6 +36,9 @@ master_training_data/
 non_crisis_data/
 standardized_data/
 
+# LLM labeling checkpoints (temporary processing files)
+llm_labeling_checkpoints/
+
 # macOS
 .DS_Store
 .AppleDouble

@@ -1,0 +1,20 @@
+# TEMPO Project - Required Python Packages
+# Install with: pip install -r requirements.txt
+
+# Core data processing
+pandas==3.0.0
+numpy==2.4.1
+
+# LLM/API integration
+google-generativeai>=0.8.0
+python-dotenv>=1.0.0
+
+# Progress tracking
+tqdm>=4.66.0
+
+# Jupyter notebooks
+jupyter>=1.1.1
+notebook>=7.5.0
+jupyterlab>=4.5.0
+ipykernel>=7.1.0
+ipywidgets>=8.1.0
